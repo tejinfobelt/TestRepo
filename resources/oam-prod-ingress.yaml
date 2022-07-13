@@ -10,16 +10,7 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 spec:
   rules:
-  - host: oamprod.infobelt.net
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: isa-ui
-            port:
-              number: 80
+  - host: ymlq.infobelt.net
   - host: drill.oamprod.infobelt.net
     http:
       paths:
