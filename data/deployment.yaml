@@ -1,369 +1,12 @@
----
-#apiVersion: v1
-#kind: PersistentVolumeClaim
-#metadata:
-#  name: efs-oam-prod
-#spec:
-#  accessModes:
-#    - ReadWriteMany
-#  storageClassName: efs-sc
-#  resources:
-#    requests:
-#      storage: 1Mi
----
-# Zoo Keeper
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: isa-zk
-spec:
-  serviceName: zk-service
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-zk
-  template:
-    metadata:
-      labels:
-        app: isa-zk
-    spec:
-      containers:
-      - name: isa-zk
-        imagePullPolicy: Always
-        image: bitnami/zookeeper:3.8.0      #agirish/zookeeper:3.6.0
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 1000
-               
-        ports:
-        - containerPort: 2181
-          name: client
-        - containerPort: 2888
-          name: server
-        - containerPort: 3888
-          name: leader-election          
-        env:
-          - name: ALLOW_ANONYMOUS_LOGIN
-            value: "yes"        
-          - name: ZOO_TICK_TIME
-            value: "4000"
-          - name: ZOO_INIT_LIMIT
-            value: "100"
-          - name: ZOO_SYNC_LIMIT
-            value: "10"
-          - name: ZOO_MAX_CNXNS
-            value: "0"
-          - name: ZOO_MAX_CLIENT_CNXNS
-            value: "600"
-          - name: ZOO_AUTOPURGE_INTERVAL
-            value: "0"
-          - name: ZOO_HEAP_SIZE
-            value: "1536"
-          - name: ZOO_MAX_SESSION_TIMEOUT
-            value: "100000"
-        resources: 
-           limits:
-              cpu: 700m
-              memory: 2500Mi
-           requests:
-              cpu: 700m
-              memory: 2500Mi
----
-# Drill 
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: isa-drill
-spec:
-  serviceName: isa-drill-service
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-drill
-  template:
-    metadata:
-      labels:
-        app: isa-drill
-    spec:
-      containers:
-      - name: isa-drill
-        imagePullPolicy: Always
-        image: infobeltinc/apache-drill:1.19.0  #agirish/drill:1.17.0 # smizy/apache-drill:1.16.0-alpine
-        env:
-          - name: CLUSTER_ID
-            value: drillcluster
-          - name: ZK_SERVERS
-            value: "zk-service:2181"        
-          - name: DRILL_CLUSTER_ID
-            value: drillcluster # {{ .Values.service.drillClusterID }}
-          - name: DRILL_HEAP
-            value: "2G" # {{ .Values.service.drillHeap }}
-          - name: DRILL_MAX_DIRECT_MEMORY
-            value: "6G" # {{ .Values.service.maxDirectMemory }}
-          - name: DRILL_ZOOKEEPER_QUORUM
-            value: "zk-service:2181" # {{ .Values.service.drillZkHosts }}
-          - name: DRILL_ZK_ROOT
-            value: drillcluster # {{ .Values.service.drillClusterID }}
-          - name: DRILL_HTTP_PORT
-            value: "8047"
-          - name: DRILL_USER_SERVER_PORT
-            value: "31010"
-        ports:
-        - containerPort: 8047 # {{ .Values.service.drillHttpPort }}
-          name: http
-        - containerPort: 31010 # {{ .Values.service.drillUserPort }}
-          name: userport
-        - containerPort: 31011 # {{ .Values.service.drillControlPort }}
-          name: controlport
-        - containerPort: 31012 # {{ .Values.service.drillDataPort }}
-          name: dataport
-        tty: true  
-        volumeMounts:
-        - mountPath: /var/lib/isa
-          name: efs-oam-prod
-        - mountPath: /opt/drill/conf/drill-override.conf
-          name: drill-config-cm
-          subPath: drill-override.conf
-        - mountPath: /opt/drill/conf/drill-env.sh
-          name: drill-config-cm
-          subPath: drill-env.sh
-        resources: 
-            limits:
-               cpu: 700m
-               memory: 5500Mi
-            requests:
-               cpu: 700m
-               memory: 4500Mi
-      volumes:
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod
-        - name: drill-config-cm
-          configMap:
-            name: drill-config-cm            
-      initContainers:
-        - name: zk-available
-          image: busybox
-          command: ['sh', '-c', 'until nc -z zk-service 2181; do echo Waiting for ZK to come up; sleep 5; done; ']
----
-# OAM ONBOARDING UI
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: isa-onboarding
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-onboarding
-  template:
-    metadata:
-      labels:
-        app: isa-onboarding
-    spec:
-      containers:      
-      - name: isa-onboarding
-        image: "997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-onboarding:0.0.1-SNAPSHO2"
-        imagePullPolicy: IfNotPresent
-        ports:
-          - containerPort: 9090
-        env:
-          - name: ORION_SERVER
-            value: "onboarding"
-          - name: SPRING_DATASOURCE_DRIVERCLASSNAME
-            value: oracle.jdbc.driver.OracleDriver
-          - name: SPRING_DATASOURCE_URL
-            value: jdbc:oracle:thin:@oam-ui.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:OPENSKYE
-          - name: SPRING_DATASOURCE_USERNAME
-            value: oam
-          - name: SPRING_DATASOURCE_PASSWORD
-            value: changeme     
-          - name: SERVER_PORT
-            value: "9090"
-          - name: SERVER_SERVLET_CONTEXT_PATH
-            value: "/webapp"
-#          - name: SERVER_SSL_ENABLED
-#            value: "false"
-        volumeMounts:
-          - name: efs-oam-prod
-            mountPath: /var/lib/isa
-        resources:
-             limits:
-                 cpu: 400m
-                 memory: 2000Mi
-             requests:
-                 cpu: 300m
-                 memory: 2000Mi
-      terminationGracePeriodSeconds: 10
-      volumes:
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod           
-
----
-# OAM UI
-
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: isa-ui
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-ui
-  template:
-    metadata:
-      labels:
-        app: isa-ui
-    spec:
-      containers:      
-      - name: isa-ui
-        image: "997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:4.52.22"
-        imagePullPolicy: IfNotPresent
-        ports:
-          - containerPort: 8090
-        env:
-          - name: ORION_SERVER
-            value: "ui"
-          - name: SERVER_PORT
-            value: "8090"
-          - name: SERVER_SERVLET_CONTEXT_PATH
-            value: "/webapp"
-          - name: SERVER_SSL_ENABLED
-            value: "false"
-          - name: SKYE_HOSTNAME
-            value: "isa-server"
-        resources:
-             limits:
-                 cpu: 400m
-                 memory: 2000Mi
-             requests:
-                 cpu: 400m
-                 memory: 2000Mi               
-        volumeMounts:
-          - name: efs-oam-prod
-            mountPath: /var/lib/isa      
-      terminationGracePeriodSeconds: 10
-      volumes:
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod         
----            
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: isa-server
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-server    
-  template:
-    metadata:
-      labels:
-        app: isa-server  
-    spec:
-      containers:        
-      - name: isa-server
-        image: "997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:4.52.22"
-        imagePullPolicy: IfNotPresent
-        ports:
-          - containerPort: 8080
-        env:
-          - name: ORION_SERVER
-            value: "server"
-          - name: SPRING_DATASOURCE_DRIVERCLASSNAME
-            value: oracle.jdbc.driver.OracleDriver
-          - name: SPRING_DATASOURCE_URL
-            value: jdbc:oracle:thin:@oam-poc.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:OPENSKYE
-          - name: SPRING_DATASOURCE_USERNAME
-            value: openskye
-          - name: SPRING_DATASOURCE_PASSWORD
-            value: changeme
-          - name: SPRING_DATA_JEST_URI
-            value: http://localhost:9200
-          - name: SPRING_JPA_DATABASE-PLATFORM
-            value: org.hibernate.dialect.Oracle12cDialect
-          - name: SPRING_JPA_DATABASE
-            value: ORACLE
-          - name: SERVER_PORT
-            value: "8080"
-          - name: SERVER_SERVLET_CONTEXT_PATH
-            value: "/webapp"
-          - name: SPRING_LIQUIBASE_CHANGE_LOG
-            value: "classpath:/db/changelog/db.changelog-master.xml"
-          - name: SPRING_LIQUIBASE_ENABLED
-            value: "true"
-          - name: BOOTSTRAP_CONFIGURATION_DOMAIN
-            value: "Skye"
-          - name: BOOTSTRAP_CONFIGURATION_ORGANIZATION
-            value: "openskye.org"
-          - name: DRILL_URL
-            value: "jdbc:drill:zk=zk-service:2181/drill/drillcluster"
-          - name: ZOOKEEPER_SERVERS
-            value: "zk-service:2181" 
-          - name: ZOOKEEPER_PATHS
-            value: "/orion/workers_latch,/orion/workers_latch2,/orion/workers_latch3"
-          - name: ZOOKEEPER_MEMBERSHIP_PATHS
-            value: "/orion/workers_group,/orion/workers_group2,/orion/workers_group3"
-          - name: ELASTICSEARCH_HOST
-            value: isa-elastic-service
-          - name: ELASTICSEARCH_PORT
-            value: "9300"
-          - name: ELASTICSEARCH_REST_API_PORT
-            value: "9200"
-          - name: ELASTICSEARCH_USERNAME
-            value: "elastic"
-          - name: ELASTICSEARCH_PASSWORD ## for 4x-qa env the pwd is changeme, qa1 env the pwd is changeme12
-            value: "changeme12"
-          - name: ELASTICSEARCH_BASICAUTHWITHSSL
-            value: "true"
-          - name: ELASTICSEARCH_TRUSTSTOREPATH
-            value: "/usr/share/elasticsearch/config/certs/elastic-certificates.p12"
-          - name: SPRING_RABBITMQ_PORT
-            value: "5672"
-          - name: SPRING_RABBITMQ_HOST
-            value: 18.224.23.228
-          - name: SPRING_RABBITMQ_USERNAME
-            value: admin
-          - name: SPRING_RABBITMQ_PASSWORD
-            value: password
-          - name: RABBITMQ_EXCHANGE
-            value: orion_regent_project_exchange
-          - name: RABBITMQ_AMQFLAG
-            value: "true"
-        volumeMounts:
-          - name: efs-oam-prod
-            mountPath: /var/lib/isa
-          - name: efs-oam-prod  
-            mountPath: /usr/share/elasticsearch/config/certs
-        resources:
-             limits:
-                 cpu: 600m
-                 memory: 4000Mi
-             requests:
-                 cpu: 600m
-                 memory: 3000Mi
-      terminationGracePeriodSeconds: 10
-      volumes:
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod
-
----
-# OAM Wokers
-
-apiVersion: apps/v1
-kind: StatefulSet
 metadata:
   name: isa-workers
+apiVersion: apps/v1
+kind: StatefulSet
 spec:
   serviceName: isa-workers-service
   replicas: 2
   selector:
-    matchLabels: 
+    matchLabels:
       app: isa-workers
   template:
     metadata:
@@ -372,173 +15,81 @@ spec:
     spec:
       containers:
       - name: isa-worker
-        image: "997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:4.52.22"
+        image: 997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:3.3.23
         imagePullPolicy: IfNotPresent
         ports:
-          - containerPort: 8080
-          - containerPort: 8080
+        - containerPort: 8080
+        - containerPort: 8080
         env:
-          - name: ORION_SERVER
-            value: "worker"
-          - name: SPRING_DATASOURCE_DRIVERCLASSNAME
-            value: oracle.jdbc.driver.OracleDriver
-          - name: SPRING_DATASOURCE_URL
-            value: jdbc:oracle:thin:@oam-poc.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:OPENSKYE
-          - name: SPRING_DATASOURCE_USERNAME
-            value: openskye
-          - name: SPRING_DATASOURCE_PASSWORD
-            value: changeme
-          - name: SPRING_DATA_JEST_URI
-            value: http://localhost:9200
-          - name: SPRING_JPA_DATABASE-PLATFORM
-            value: org.hibernate.dialect.Oracle12cDialect
-          - name: SPRING_JPA_DATABASE
-            value: ORACLE
-          - name: WORKER_CONFIGURATION_HOSTNAME
-            #value: isa-workers
-            valueFrom:
-              fieldRef:
-                apiVersion: v1
-                fieldPath: metadata.name
-            #value: isa-workers
-          - name: DRILL_URL
-            value: "jdbc:drill:zk=zk-service:2181/drill/drillcluster"
-          - name: ZOOKEEPER_SERVERS
-            value: "zk-service:2181"
-          - name: ZOOKEEPER_PATHS
-            value: "/orion/workers_latch,/orion/workers_latch2,/orion/workers_latch3"
-          - name: ZOOKEEPER_MEMBERSHIP_PATHS
-            value: "/orion/workers_group,/orion/workers_group2,/orion/workers_group3"
-          - name: WORKER_CONFIGURATION_ZOOKEEPER_PATH
-            value: "/orion/workers_latch"
-          - name: WORKER_CONFIGURATION_ZOOKEEPER_MEMBERSHIP_PATH
-            value: "/orion/workers_group"
-          - name: ELASTICSEARCH_HOST
-            value: isa-elastic-service
-          - name: ELASTICSEARCH_PORT
-            value: "9300"
-          - name: ELASTICSEARCH_REST_API_PORT
-            value: "9200"
-          - name: ELASTICSEARCH_USERNAME
-            value: "elastic"
-          - name: ELASTICSEARCH_PASSWORD ## for 4x-qa env the pwd is changeme, qa1 env the pwd is changeme12
-            value: "changeme12"
-          - name: ELASTICSEARCH_BASICAUTHWITHSSL
-            value: "true"
-          - name: ELASTICSEARCH_TRUSTSTOREPATH
-            value: "/usr/share/elasticsearch/config/certs/elastic-certificates.p12"
-          - name: JAVA_OPTS
-            #value: "-XX:+UnlockExperimentalVMOptions -XX:+UseCGroupMemoryLimitForHeap"
-            value: "-Xms1024m -Xmx4096m"
-          - name: WORKER_CONFIGURATION_DELIMITED_FILE_ARCHIVE_FOLDER
-            value: /var/lib/isa/delimitedFileArchive
-          - name: WORKER_CONFIGURATION_KEEP_ARCHIVING_EVEN_AFTER_AN_EXCEPTION_IS_THROWN
-            value: "true"
-          - name: WORKER_CONFIGURATION_KEEP_ARCHIVING_EVEN_AFTER_VERIFICATION_FAILED            
-            value: "true"              
+        - name: ORION_SERVER
+          value: worker
+        - name: SPRING_DATASOURCE_DRIVERCLASSNAME
+          value: oracle.jdbc.driver.OracleDriver
+        - name: SPRING_DATASOURCE_URL
+          value: jdbc:oracle:thin:@oam-poc.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:zee
+        - name: SPRING_DATASOURCE_USERNAME
+          value: zeeadmin
+        - name: SPRING_DATASOURCE_PASSWORD
+          value: zee123
+        - name: SPRING_DATA_JEST_URI
+          value: http://localhost:9200
+        - name: SPRING_JPA_DATABASE-PLATFORM
+          value: org.hibernate.dialect.Oracle12cDialect
+        - name: SPRING_JPA_DATABASE
+          value: ORACLE
+        - name: WORKER_CONFIGURATION_HOSTNAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.name
+        - name: DRILL_URL
+          value: jdbc:drill:zk=zk-service:2181/drill/drillcluster
+        - name: ZOOKEEPER_SERVERS
+          value: zk-service:2181
+        - name: ZOOKEEPER_PATHS
+          value: /orion/workers_latch,/orion/workers_latch2,/orion/workers_latch3
+        - name: ZOOKEEPER_MEMBERSHIP_PATHS
+          value: /orion/workers_group,/orion/workers_group2,/orion/workers_group3
+        - name: WORKER_CONFIGURATION_ZOOKEEPER_PATH
+          value: /orion/workers_latch
+        - name: WORKER_CONFIGURATION_ZOOKEEPER_MEMBERSHIP_PATH
+          value: /orion/workers_group
+        - name: ELASTICSEARCH_HOST
+          value: isa-elastic-service
+        - name: ELASTICSEARCH_PORT
+          value: 9300
+        - name: ELASTICSEARCH_REST_API_PORT
+          value: 9200
+        - name: ELASTICSEARCH_USERNAME
+          value: elastic
+        - name: ELASTICSEARCH_PASSWORD
+          value: changeme12
+        - name: ELASTICSEARCH_BASICAUTHWITHSSL
+          value: true
+        - name: ELASTICSEARCH_TRUSTSTOREPATH
+          value: /usr/share/elasticsearch/config/certs/elastic-certificates.p12
+        - name: JAVA_OPTS
+          value: -Xms1024m -Xmx4096m
+        - name: WORKER_CONFIGURATION_DELIMITED_FILE_ARCHIVE_FOLDER
+          value: /var/lib/isa/delimitedFileArchive
+        - name: WORKER_CONFIGURATION_KEEP_ARCHIVING_EVEN_AFTER_AN_EXCEPTION_IS_THROWN
+          value: true
+        - name: WORKER_CONFIGURATION_KEEP_ARCHIVING_EVEN_AFTER_VERIFICATION_FAILED
+          value: true
         volumeMounts:
-          - name: efs-oam-prod
-            mountPath: /var/lib/isa
-          - name: efs-oam-prod  
-            mountPath: /usr/share/elasticsearch/config/certs
+        - name: efs-oam-prod
+          mountPath: /var/lib/isa
+        - name: efs-oam-prod
+          mountPath: /usr/share/elasticsearch/config/certs
         resources:
-            limits:
-              cpu: 600m
-              memory: 3000Mi
-            requests:
-               cpu: 600m
-               memory: 3000Mi
+          limits:
+            cpu: 600m
+            memory: 3000Mi
+          requests:
+            cpu: 600m
+            memory: 3000Mi
       terminationGracePeriodSeconds: 10
       volumes:
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod
-
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: isa-elastic
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: isa-elastic
-  template:
-    metadata:
-      labels:
-        app: isa-elastic
-    spec:
-      containers:
-      - name: elastic
-        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.2
-        securityContext:
-          capabilities:
-          #drop:
-          #- ALL
-          runAsNonRoot: true
-          runAsUser: 1000
-        env:
-          - name: discovery.type
-            value: single-node
-          - name: cluster.name
-            value: elasticsearch
-          - name: ELASTICSEARCH_HOST
-            value: isa-elastic-service
-          - name: ELASTIC_PASSWORD
-            value: changeme12
-          - name: ELASTICSEARCH_PORT
-            value: "9300"
-          - name: ELASTICSEARCH_REST_API_PORT
-            value: "9200"
-          - name: ES_JAVA_OPTS
-            value: "-Xms1g -Xmx3g"
-          - name: node.max_local_storage_nodes
-            value: "10"
-        volumeMounts:
-          - name: efs-oam-prod
-#          - name: elastic-certificates
-            mountPath: /usr/share/elasticsearch/config/certs
-          - name: config
-            mountPath: /usr/share/elasticsearch/config/elasticsearch.yml
-            readOnly: true
-            subPath: elasticsearch.yml
-          - name: efs-oam-prod
-            mountPath: /usr/share/elasticsearch/data
-        resources:
-         limits:
-           cpu: 500m
-           memory: 2000Mi
-         requests:
-           cpu: 500m
-           memory: 2000Mi
-
-      initContainers:
-      - name: create-certs
-        image: docker.elastic.co/elasticsearch/elasticsearch:7.17.2
-        command: [ 'sh' , '-c' , "  bin/elasticsearch-certutil ca --silent --pass '' --out elastic-stack-ca.p12 ; sleep 20 ;  bin/elasticsearch-certutil cert --silent --ca elastic-stack-ca.p12 -name 'CN=isa-elastic-service' --ca-pass '' --pass '' --out config/certs/elastic-certificates.p12 ; sleep 20 ; cp -rpf /usr/share/elasticsearch/elastic-stack-ca.p12 /usr/share/elasticsearch/config/certs/ " ]
-        securityContext:
-          capabilities:
-          #drop:
-          #- ALL
-          runAsNonRoot: true
-          runAsUser: 1000
-        volumeMounts:
-          - name: efs-oam-prod
-#          - name: elastic-certificates
-            mountPath: /usr/share/elasticsearch/config/certs
-
-      volumes:
-        - name:  config
-          configMap:
-            name: myeschart7172-config # update the configmap name as per chart version and name
-#        - name: elastic-certificates
-#          emptyDir: {}      
-        - name: efs-oam-prod
-          persistentVolumeClaim:
-            claimName: efs-oam-prod            
-      imagePullSecrets: []
-      securityContext:
-        fsGroup: 1000
-              
----
+      - name: efs-oam-prod
+        persistentVolumeClaim:
+          claimName: efs-oam-prod
