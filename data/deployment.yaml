@@ -371,7 +371,7 @@ spec:
     spec:
       containers:
       - name: isa-worker
-        image: 997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:3.3.35
+        image: 997742452154.dkr.ecr.us-west-2.amazonaws.com/infobelt/oam-saas:3.3.45
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
@@ -382,11 +382,11 @@ spec:
         - name: SPRING_DATASOURCE_DRIVERCLASSNAME
           value: oracle.jdbc.driver.OracleDriver
         - name: SPRING_DATASOURCE_URL
-          value: jdbc:oracle:thin:@oam-poc.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:ZEE
+          value: jdbc:oracle:thin:@oam-poc.c6njtcwgnr85.us-west-2.rds.amazonaws.com:1521:VOOT
         - name: SPRING_DATASOURCE_USERNAME
-          value: ZEEADMIN
+          value: VOOTADMIN
         - name: SPRING_DATASOURCE_PASSWORD
-          value: ZEE123
+          value: VOOT123
         - name: SPRING_DATA_JEST_URI
           value: http://localhost:9200
         - name: SPRING_JPA_DATABASE-PLATFORM
