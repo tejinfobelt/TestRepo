@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: oam-prod-ingress
+  namespace: oam-prod
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    cert-manager.io/cluster-issuer: letsencrypt-cluster-issuer
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/tls-acme: "true"
+spec:
+  rules:
+    - host: oamprod.infobelt.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: isa-ui
+                port:
+                  number: 80
+    - host: drill.oamprod.infobelt.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: isa-drill-service
+                port:
+                  number: 8047
+    - host: onboarding.infobelt.net
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: isa-onboarding
+                port:
+                  number: 80                  
+  tls:
+  - hosts:
+    - 'oamprod.infobelt.net'
+    secretName: oamprod-infobelt-net
+  - hosts:
+    - 'drill.oamprod.infobelt.net'
+    secretName: drill-oamprod-infobelt-net
+  - hosts:
+    - 'onboarding.infobelt.net'
+    secretName: onboarding-infobelt-net    
